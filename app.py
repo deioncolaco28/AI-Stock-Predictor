@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from yahooquery import Ticker
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.ensemble import RandomForestRegressor
 from keras.models import load_model, Sequential
 from keras.layers import LSTM, Dense
 import os
@@ -105,9 +106,31 @@ def predict():
         x_test = np.array(x_test)
         x_test = np.reshape(x_test, (x_test.shape[0], x_test.shape[1], 1))
 
-        # Make predictions
-        predictions = model.predict(x_test)
-        predictions = scaler.inverse_transform(predictions)
+        # Create x_train and y_train for the Ensemble Model
+        x_train = []
+        y_train = []
+        for i in range(100, len(train_data)):
+            x_train.append(train_data[i-100:i, 0])
+            y_train.append(train_data[i, 0])
+            
+        x_train, y_train = np.array(x_train), np.array(y_train)
+        
+        # Train Random Forest Regressor dynamically for this specific ticker
+        rf_model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
+        rf_model.fit(x_train, y_train)
+
+        # Make LSTM predictions
+        lstm_predictions = model.predict(x_test)
+        lstm_predictions = scaler.inverse_transform(lstm_predictions)
+        
+        # Make Random Forest predictions
+        rf_x_test = x_test.reshape((x_test.shape[0], x_test.shape[1]))
+        rf_predictions = rf_model.predict(rf_x_test)
+        rf_predictions = rf_predictions.reshape(-1, 1)
+        rf_predictions = scaler.inverse_transform(rf_predictions)
+        
+        # Ensemble: Average the predictions for better accuracy
+        predictions = (lstm_predictions + rf_predictions) / 2.0
         
         # Calculate RMSE
         rmse = np.sqrt(np.mean(predictions - y_test)**2)
@@ -127,8 +150,18 @@ def predict():
         x_all = np.array(x_all)
         x_all = np.reshape(x_all, (x_all.shape[0], x_all.shape[1], 1))
         
-        all_predictions = model.predict(x_all)
-        all_predictions = scaler.inverse_transform(all_predictions)
+        # LSTM predictions for all data
+        lstm_all_predictions = model.predict(x_all)
+        lstm_all_predictions = scaler.inverse_transform(lstm_all_predictions)
+        
+        # Random Forest predictions for all data
+        rf_x_all = x_all.reshape((x_all.shape[0], x_all.shape[1]))
+        rf_all_predictions = rf_model.predict(rf_x_all)
+        rf_all_predictions = rf_all_predictions.reshape(-1, 1)
+        rf_all_predictions = scaler.inverse_transform(rf_all_predictions)
+        
+        # Final ensemble predictions for all data
+        all_predictions = (lstm_all_predictions + rf_all_predictions) / 2.0
         
         analysis_df = pd.DataFrame(index=df.index[100:])
         analysis_df['Actual'] = dataset[100:].flatten()
